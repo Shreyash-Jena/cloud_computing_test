@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+local_db.json
+.vscode/
+.DS_Store

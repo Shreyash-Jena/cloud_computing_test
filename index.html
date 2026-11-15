@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IIIT Laundry Service | Smart Campus Laundry Portal</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        heading: ['"Outfit"', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            200: '#bfdbfe',
+                            300: '#93c5fd',
+                            400: '#60a5fa',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- React 18 and Babel CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%);
+            min-height: 100vh;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+        }
+        .glass-nav {
+            background: rgba(255, 255, 255, 0.88);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+        }
+        .btn-glow {
+            box-shadow: 0 4px 14px 0 rgba(37, 99, 235, 0.35);
+        }
+        .btn-glow:hover {
+            box-shadow: 0 6px 20px 0 rgba(37, 99, 235, 0.45);
+        }
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 0.9; transform: scale(1.05); }
+        }
+        .pulse-bubble {
+            animation: pulseGlow 4s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased selection:bg-blue-500 selection:text-white">
+
+<div id="root"></div>
+
+<script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // =========================================================================
+    // CONFIGURATION: Set your AWS API Gateway Endpoint here
+    // Example: 'https://xxxxxx.execute-api.ap-south-1.amazonaws.com/api'
+    // =========================================================================
+    // Auto-detects local testing vs AWS deployment
+    const API_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? 'http://localhost:8000/api'
+        : 'https://5ff43oy8g1.execute-api.ap-south-1.amazonaws.com/api';
+
+    async function callApi(payload) {
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            return await res.json();
+        } catch (err) {
+            console.error("API Error:", err);
+            return { error: "Failed to connect to AWS Backend. Ensure API Gateway URL is configured." };
+        }
+    }
+
+    function App() {
+        // Auth State: null | { role: 'STUDENT' | 'STAFF', email, rollNo, name }
+        const [user, setUser] = useState(() => {
+            const saved = localStorage.getItem('iiit_laundry_user');
+            return saved ? JSON.parse(saved) : null;
+        });
+
+        const [isAuthOpen, setIsAuthOpen] = useState(false);
+        const [authMode, setAuthMode] = useState('student'); // 'student' | 'staff'
+        const [isSignUp, setIsSignUp] = useState(false);
+        
+        // System & Live Stats State
+        const [stats, setStats] = useState({
+            total_submitted: 0,
+            queued_count: 0,
+            washing_count: 0,
+            ready_count: 0,
+            working_machines: 4,
+            total_machines: 5,
+            alert_message: '',
+            est_wait_minutes: 0
+        });
+
+        const [loadingStats, setLoadingStats] = useState(false);
+
+        // Fetch live stats from AWS DynamoDB / Lambda
+        const fetchStats = async () => {
+            setLoadingStats(true);
+            const res = await callApi({ action: 'GET_STATS' });
+            if (!res.error) {
+                setStats(res);
+            }
+            setLoadingStats(false);
+        };
+
+        useEffect(() => {
+            fetchStats();
+            const timer = setInterval(fetchStats, 30000); // Auto-refresh stats every 30s
+            return () => clearInterval(timer);
+        }, []);
+
+        const handleLoginSuccess = (userData) => {
+            setUser(userData);
+            localStorage.setItem('iiit_laundry_user', JSON.stringify(userData));
+            setIsAuthOpen(false);
+            fetchStats();
+        };
+
+        const handleSignOut = () => {
+            setUser(null);
+            localStorage.removeItem('iiit_laundry_user');
+            fetchStats();
+        };
+
+        return (
+            <div class="flex flex-col min-h-screen">
+                {/* 1. TOP NAVBAR */}
+                <header class="sticky top-0 z-40 glass-nav">
+                    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+                        
+                        {/* Left: Quick System Status Pill */}
+                        <div class="hidden sm:flex items-center space-x-2 text-xs font-semibold px-3 py-1.5 rounded-full bg-slate-100/90 text-slate-600 border border-slate-200">
+                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <span>{stats.working_machines}/{stats.total_machines} Machines Operational</span>
+                        </div>
+
+                        {/* Center: Stylish Main Branded Text */}
+                        <div class="flex items-center space-x-3 cursor-pointer select-none" onClick={() => fetchStats()}>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+                                <span class="text-xl">🧺</span>
+                            </div>
+                            <div class="text-center sm:text-left">
+                                <h1 class="font-heading text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900 flex items-center gap-2">
+                                    <span>IIIT Laundry Service</span>
+                                    <span class="text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md hidden md:inline">
+                                        Campus Cloud
+                                    </span>
+                                </h1>
+                                <p class="text-xs text-slate-500 font-medium hidden sm:block">Automated Laundry Operations & Queue Tracking</p>
+                            </div>
+                        </div>
+
+                        {/* Right: Single Sign In / Sign Up Button or Profile Pill */}
+                        <div>
+                            {user ? (
+                                <div class="flex items-center space-x-3">
+                                    <div class="hidden md:flex flex-col text-right">
+                                        <span class="text-xs font-bold text-slate-900">
+                                            {user.role === 'STAFF' ? 'Laundry Staff' : (user.rollNo || user.email.split('@')[0])}
+                                        </span>
+                                        <span class="text-[11px] text-slate-500">{user.email}</span>
+                                    </div>
+                                    <button 
+                                        onClick={handleSignOut}
+                                        class="inline-flex items-center space-x-1.5 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-600 font-semibold px-4 py-2 rounded-xl text-xs sm:text-sm border border-slate-200 transition duration-150"
+                                    >
+                                        <span>Sign Out</span>
+                                        <span>🚪</span>
+                                    </button>
+                                </div>
+                            ) : (
+                                <button 
+                                    onClick={() => setIsAuthOpen(true)}
+                                    class="inline-flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs sm:text-sm transition duration-200 btn-glow"
+                                >
+                                    <span>Sign In / Sign Up</span>
+                                    <span class="text-base">✨</span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </header>
+
+                {/* 2. EMERGENCY WORKER ALERT BANNER */}
+                {stats.alert_message && (
+                    <div class="bg-amber-500/10 border-b border-amber-500/20 text-amber-900 px-4 py-3">
+                        <div class="max-w-7xl mx-auto flex items-center justify-between text-xs sm:text-sm font-medium">
+                            <div class="flex items-center space-x-2.5">
+                                <span class="text-lg">⚠️</span>
+                                <div>
+                                    <strong class="font-bold">Maintenance Notice: </strong>
+                                    <span>{stats.alert_message}</span>
+                                </div>
+                            </div>
+                            <span class="bg-amber-100 text-amber-800 text-xs px-2.5 py-1 rounded-full font-bold ml-2 shrink-0">
+                                {stats.working_machines} / {stats.total_machines} Working
+                            </span>
+                        </div>
+                    </div>
+                )}
+
+                {/* 3. MAIN CONTENT: CONDITIONAL SCREENS */}
+                <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    {/* Live Metric Cards: Always visible for quick glance */}
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                        <div class="glass-panel p-4 rounded-2xl shadow-sm border border-slate-200/80">
+                            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">In Washing Queue</div>
+                            <div class="text-2xl sm:text-3xl font-extrabold text-blue-600">{stats.queued_count} <span class="text-sm font-medium text-slate-500">buckets</span></div>
+                        </div>
+
+                        <div class="glass-panel p-4 rounded-2xl shadow-sm border border-slate-200/80">
+                            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Currently Washing</div>
+                            <div class="text-2xl sm:text-3xl font-extrabold text-amber-600">{stats.washing_count} <span class="text-sm font-medium text-slate-500">active</span></div>
+                        </div>
+
+                        <div class="glass-panel p-4 rounded-2xl shadow-sm border border-slate-200/80">
+                            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Working Machines</div>
+                            <div class="text-2xl sm:text-3xl font-extrabold text-emerald-600">{stats.working_machines} <span class="text-sm font-medium text-slate-500">/ {stats.total_machines}</span></div>
+                        </div>
+
+                        <div class="glass-panel p-4 rounded-2xl shadow-sm border border-slate-200/80">
+                            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Estimated Wait Time</div>
+                            <div class="text-2xl sm:text-3xl font-extrabold text-indigo-600">
+                                {stats.est_wait_minutes === -1 || stats.working_machines === 0 
+                                    ? <span class="text-rose-600 text-lg sm:text-xl">Down</span> 
+                                    : stats.est_wait_minutes === 0 
+                                        ? <span class="text-emerald-600 text-lg sm:text-xl">No Queue</span>
+                                        : `~${stats.est_wait_minutes}m`
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* SCREEN ROUTING BASED ON ROLE */}
+                    {!user && (
+                        <PublicLandingScreen 
+                            onOpenAuth={() => setIsAuthOpen(true)} 
+                            stats={stats} 
+                            onRefreshStats={fetchStats}
+                            loading={loadingStats}
+                        />
+                    )}
+
+                    {user && user.role === 'STUDENT' && (
+                        <StudentPortalScreen 
+                            user={user} 
+                            stats={stats} 
+                            onRefreshStats={fetchStats} 
+                        />
+                    )}
+
+                    {user && user.role === 'STAFF' && (
+                        <StaffDashboardScreen 
+                            user={user} 
+                            stats={stats} 
+                            onRefreshStats={fetchStats} 
+                        />
+                    )}
+                </main>
+
+                {/* 4. FOOTER WITH INQUIRY CONTACT */}
+                <footer class="mt-auto glass-nav border-t border-slate-200 py-6 text-center text-slate-600 text-sm">
+                    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+                            <span class="font-medium text-slate-700">IIIT BBSR Laundry Management System</span>
+                        </div>
+                        <div class="flex items-center space-x-2 font-medium bg-blue-50/80 border border-blue-200/60 text-blue-900 px-4 py-1.5 rounded-full shadow-sm text-xs sm:text-sm">
+                            <span>📞</span>
+                            <span>For assistance or queries, contact —</span>
+                            <a href="tel:6372702075" class="font-bold text-blue-700 hover:text-blue-900 underline decoration-blue-400">
+                                6372702075
+                            </a>
+                        </div>
+                        <div class="text-xs text-slate-400">
+                            Powered by AWS Lambda & DynamoDB
+                        </div>
+                    </div>
+                </footer>
+
+                {/* 5. AUTH MODAL (SIGN IN / SIGN UP POPUP) */}
+                {isAuthOpen && (
+                    <AuthModal 
+                        isOpen={isAuthOpen} 
+                        onClose={() => setIsAuthOpen(false)}
+                        onSuccess={handleLoginSuccess}
+                        authMode={authMode}
+                        setAuthMode={setAuthMode}
+                        isSignUp={isSignUp}
+                        setIsSignUp={setIsSignUp}
+                    />
+                )}
+            </div>
+        );
+    }
+
+    // =========================================================================
+    // MODAL: SIGN IN / SIGN UP WINDOW
+    // =========================================================================
+    function AuthModal({ isOpen, onClose, onSuccess, authMode, setAuthMode, isSignUp, setIsSignUp }) {
+        const [email, setEmail] = useState('');
+        const [password, setPassword] = useState('');
+        const [rollNo, setRollNo] = useState('');
+        const [loading, setLoading] = useState(false);
+        const [error, setError] = useState('');
+        const [successMsg, setSuccessMsg] = useState('');
+
+        const handleSubmit = async (e) => {
+            e.preventDefault();
+            setError('');
+            setSuccessMsg('');
+            setLoading(true);
+
+            const payload = {
+                action: 'AUTH_LOGIN',
+                email: email.trim(),
+                password: password.trim(),
+                rollNo: rollNo.trim().toUpperCase(),
+                isSignUp: isSignUp
+            };
+
+            const res = await callApi(payload);
+            setLoading(false);
+
+            if (res.error) {
+                setError(res.error);
+            } else {
+                setSuccessMsg(res.message || 'Authenticated successfully!');
+                setTimeout(() => {
+                    onSuccess(res);
+                }, 500);
+            }
+        };
+
+        return (
+            <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity">
+                <div class="glass-panel bg-white w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200 relative animate-in fade-in zoom-in-95 duration-200">
+                    
+                    {/* Close Button */}
+                    <button 
+                        onClick={onClose} 
+                        class="absolute top-5 right-5 text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-full w-8 h-8 flex items-center justify-center font-bold text-sm transition"
+                    >
+                        ✕
+                    </button>
+
+                    {/* Modal Header */}
+                    <div class="text-center mb-6">
+                        <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center mx-auto mb-3 shadow-md shadow-blue-500/20 text-2xl">
+                            🧺
+                        </div>
+                        <h2 class="font-heading text-2xl font-bold text-slate-900">
+                            {isSignUp ? 'Create Student Account' : 'Welcome Back'}
+                        </h2>
+                        <p class="text-xs text-slate-500 mt-1">
+                            {authMode === 'student' ? 'Access your laundry queue & notifications' : 'Staff credentials required'}
+                        </p>
+                    </div>
+
+                    {/* Role Selector Tabs */}
+                    <div class="grid grid-cols-2 p-1 bg-slate-100 rounded-xl mb-6">
+                        <button
+                            type="button"
+                            onClick={() => { setAuthMode('student'); setError(''); }}
+                            class={`py-2 text-xs font-bold rounded-lg transition ${authMode === 'student' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                            👨‍🎓 Student
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => { setAuthMode('staff'); setIsSignUp(false); setError(''); }}
+                            class={`py-2 text-xs font-bold rounded-lg transition ${authMode === 'staff' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                            ⚙️ Laundry Staff
+                        </button>
+                    </div>
+
+                    {/* Alert Message */}
+                    {error && (
+                        <div class="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+                            {error}
+                        </div>
+                    )}
+                    {successMsg && (
+                        <div class="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium">
+                            {successMsg}
+                        </div>
+                    )}
+
+                    {/* Auth Form */}
+                    <form onSubmit={handleSubmit} class="space-y-4">
+                        {authMode === 'student' && isSignUp && (
+                            <div>
+                                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Roll Number</label>
+                                <input 
+                                    type="text" 
+                                    required 
+                                    value={rollNo}
+                                    onChange={(e) => setRollNo(e.target.value)}
+                                    placeholder="e.g. B123128" 
+                                    class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition"
+                                />
+                            </div>
+                        )}
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                {authMode === 'student' ? 'Institute Email' : 'Staff Email'}
+                            </label>
+                            <input 
+                                type="email" 
+                                required 
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder={authMode === 'student' ? 'your_roll@iiit-bh.ac.in' : 'pc@iiit-bh.ac.in'} 
+                                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition"
+                            />
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                {authMode === 'student' ? '4-Digit PIN' : 'Password'}
+                            </label>
+                            <input 
+                                type="password" 
+                                required 
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                placeholder={authMode === 'student' ? '••••' : 'Enter password'} 
+                                maxlength={authMode === 'student' ? 8 : 40}
+                                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition"
+                            />
+                        </div>
+
+                        <button 
+                            type="submit" 
+                            disabled={loading}
+                            class="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm btn-glow transition disabled:opacity-50"
+                        >
+                            {loading ? 'Authenticating...' : (isSignUp ? 'Register & Sign In' : 'Sign In')}
+                        </button>
+                    </form>
+
+                    {/* Student Sign In / Sign Up toggle */}
+                    {authMode === 'student' && (
+                        <div class="mt-6 text-center text-xs text-slate-500">
+                            {isSignUp ? (
+                                <span>Already registered? <button onClick={() => { setIsSignUp(false); setError(''); }} class="text-blue-600 font-bold hover:underline">Sign In with your PIN</button></span>
+                            ) : (
+                                <span>First time here? <button onClick={() => { setIsSignUp(true); setError(''); }} class="text-blue-600 font-bold hover:underline">Sign Up & set PIN</button></span>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    // =========================================================================
+    // SCREEN 1: PUBLIC LANDING PAGE (NOT LOGGED IN)
+    // =========================================================================
+    function PublicLandingScreen({ onOpenAuth, stats, onRefreshStats, loading }) {
+        const [trackQuery, setTrackQuery] = useState('');
+        const [trackResult, setTrackResult] = useState(null);
+        const [trackLoading, setTrackLoading] = useState(false);
+        const [trackError, setTrackError] = useState('');
+
+        const handleTrack = async (e) => {
+            e.preventDefault();
+            if (!trackQuery.trim()) return;
+            setTrackLoading(true);
+            setTrackError('');
+            setTrackResult(null);
+
+            const res = await callApi({ action: 'CHECK_MY_STATUS', query: trackQuery.trim() });
+            setTrackLoading(false);
+
+            if (res.error) {
+                setTrackError(res.error);
+            } else if (!res.request) {
+                setTrackError('No active laundry request found for this Roll No / Email.');
+            } else {
+                setTrackResult(res);
+            }
+        };
+
+        return (
+            <div class="space-y-8">
+                {/* Hero Card */}
+                <div class="glass-panel p-8 sm:p-12 rounded-3xl border border-slate-200 text-center relative overflow-hidden">
+                    <div class="absolute -top-16 -right-16 w-56 h-56 bg-blue-400/10 rounded-full blur-3xl pointer-events-none"></div>
+                    <div class="absolute -bottom-16 -left-16 w-56 h-56 bg-indigo-400/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                    <div class="max-w-2xl mx-auto relative z-10">
+                        <span class="inline-block bg-blue-100 text-blue-700 text-xs font-bold uppercase tracking-wider px-3.5 py-1.5 rounded-full mb-4">
+                            Smart Campus Utility
+                        </span>
+                        <h2 class="font-heading text-3xl sm:text-5xl font-black text-slate-900 tracking-tight leading-tight">
+                            Track Your Laundry <br class="hidden sm:inline" />
+                            <span class="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                                Without Waiting in Lines
+                            </span>
+                        </h2>
+                        <p class="mt-4 text-sm sm:text-base text-slate-600">
+                            Check operational washing machines, live queue times, and track your laundry status in real time.
+                        </p>
+
+                        <div class="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+                            <button 
+                                onClick={onOpenAuth}
+                                class="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm sm:text-base btn-glow transition"
+                            >
+                                Submit Laundry Bucket ✨
+                            </button>
+                            <button 
+                                onClick={onRefreshStats}
+                                class="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-700 font-bold text-sm border border-slate-200 transition"
+                            >
+                                {loading ? 'Refreshing...' : '🔄 Refresh Live Status'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Instant Bucket Tracker Card */}
+                <div class="glass-panel p-6 sm:p-8 rounded-3xl border border-slate-200">
+                    <div class="max-w-xl mx-auto">
+                        <div class="text-center mb-6">
+                            <h3 class="font-heading text-xl font-bold text-slate-900">🔍 Instant Bucket Tracker</h3>
+                            <p class="text-xs text-slate-500 mt-1">Check your laundry progress without logging in</p>
+                        </div>
+
+                        <form onSubmit={handleTrack} class="flex gap-2">
+                            <input 
+                                type="text"
+                                value={trackQuery}
+                                onChange={(e) => setTrackQuery(e.target.value)}
+                                placeholder="Enter Roll Number or Institute Email (e.g. B123128)"
+                                class="flex-1 px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
+                            />
+                            <button 
+                                type="submit"
+                                disabled={trackLoading}
+                                class="px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm transition disabled:opacity-50"
+                            >
+                                {trackLoading ? 'Searching...' : 'Track'}
+                            </button>
+                        </form>
+
+                        {trackError && (
+                            <div class="mt-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-medium text-center">
+                                {trackError}
+                            </div>
+                        )}
+
+                        {trackResult && trackResult.request && (
+                            <div class="mt-6 p-5 rounded-2xl bg-white border border-slate-200 shadow-sm">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="font-bold text-slate-900">
+                                        Bucket #{trackResult.request.id}
+                                    </div>
+                                    <StatusBadge status={trackResult.request.status} />
+                                </div>
+                                <div class="text-xs text-slate-600 space-y-1">
+                                    <div><strong>Roll No:</strong> {trackResult.request.rollNo}</div>
+                                    <div><strong>Submitted:</strong> {trackResult.request.date}</div>
+                                </div>
+                                <div class="mt-4 p-3 rounded-xl bg-blue-50/80 text-blue-900 text-xs font-semibold">
+                                    {trackResult.request.status === 'READY' ? (
+                                        <span>🎉 <strong>Ready for pickup!</strong> Head to the laundry room to collect your bucket.</span>
+                                    ) : trackResult.request.status === 'WASHING' ? (
+                                        <span>🔄 Currently inside the washing machine! Expected ready shortly.</span>
+                                    ) : (
+                                        <span>Position in queue: #{trackResult.queue_position} · Est. wait time: ~{trackResult.estimated_minutes} mins</span>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // =========================================================================
+    // SCREEN 2: STUDENT PORTAL SCREEN
+    // =========================================================================
+    function StudentPortalScreen({ user, stats, onRefreshStats }) {
+        const [activeRequest, setActiveRequest] = useState(null);
+        const [queuePosition, setQueuePosition] = useState(0);
+        const [estimatedWait, setEstimatedWait] = useState(0);
+        const [loadingStatus, setLoadingStatus] = useState(true);
+
+        // Submit new bucket state
+        const [submitting, setSubmitting] = useState(false);
+        const [submitPin, setSubmitPin] = useState('');
+        const [submitMsg, setSubmitMsg] = useState({ text: '', type: '' });
+
+        const loadStudentStatus = async () => {
+            setLoadingStatus(true);
+            const res = await callApi({ action: 'CHECK_MY_STATUS', query: user.email });
+            if (!res.error) {
+                setActiveRequest(res.request || null);
+                setQueuePosition(res.queue_position || 0);
+                setEstimatedWait(res.estimated_minutes || 0);
+            }
+            setLoadingStatus(false);
+        };
+
+        useEffect(() => {
+            loadStudentStatus();
+        }, [user.email]);
+
+        const handleSubmitBucket = async (e) => {
+            e.preventDefault();
+            setSubmitting(true);
+            setSubmitMsg({ text: '', type: '' });
+
+            const res = await callApi({
+                action: 'STUDENT_REQUEST',
+                rollNo: user.rollNo,
+                email: user.email,
+                pin: submitPin
+            });
+
+            setSubmitting(false);
+
+            if (res.error) {
+                setSubmitMsg({ text: res.error, type: 'error' });
+            } else {
+                setSubmitMsg({ text: `Bucket #${res.id} submitted successfully!`, type: 'success' });
+                setSubmitPin('');
+                loadStudentStatus();
+                onRefreshStats();
+            }
+        };
+
+        const hasActiveBucket = activeRequest && ['REQUESTED', 'APPROVED_WAITING', 'QUEUED', 'WASHING'].includes(activeRequest.status);
+
+        return (
+            <div class="space-y-6">
+                {/* Student Header */}
+                <div class="glass-panel p-6 rounded-3xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div>
+                        <span class="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                            Student Dashboard
+                        </span>
+                        <h2 class="font-heading text-2xl font-bold text-slate-900 mt-2">
+                            Welcome, {user.rollNo || user.email.split('@')[0]}
+                        </h2>
+                        <p class="text-xs text-slate-500">Registered Email: {user.email}</p>
+                    </div>
+
+                    <button 
+                        onClick={() => { loadStudentStatus(); onRefreshStats(); }}
+                        class="px-4 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold border border-slate-200 transition"
+                    >
+                        🔄 Refresh Status
+                    </button>
+                </div>
+
+                {/* Active Bucket Progress Banner */}
+                {activeRequest && (
+                    <div class="glass-panel p-6 rounded-3xl border border-slate-200">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="font-heading text-lg font-bold text-slate-900">
+                                Current Bucket: #{activeRequest.id}
+                            </h3>
+                            <StatusBadge status={activeRequest.status} />
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-slate-50/80 rounded-2xl border border-slate-200 text-center">
+                            <div>
+                                <span class="text-[11px] font-bold uppercase text-slate-400">Submission Date</span>
+                                <div class="text-sm font-bold text-slate-800 mt-1">{activeRequest.date}</div>
+                            </div>
+                            <div>
+                                <span class="text-[11px] font-bold uppercase text-slate-400">Queue Position</span>
+                                <div class="text-sm font-bold text-blue-600 mt-1">
+                                    {activeRequest.status === 'WASHING' ? 'In Machine' : queuePosition > 0 ? `#${queuePosition}` : 'Processing'}
+                                </div>
+                            </div>
+                            <div>
+                                <span class="text-[11px] font-bold uppercase text-slate-400">Est. Completion</span>
+                                <div class="text-sm font-bold text-indigo-600 mt-1">
+                                    {activeRequest.status === 'READY' ? 'Ready for Pickup 🎉' : `~${estimatedWait} mins`}
+                                </div>
+                            </div>
+                        </div>
+
+                        {activeRequest.status === 'READY' && (
+                            <div class="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-sm font-semibold flex items-center gap-3">
+                                <span class="text-2xl">🎉</span>
+                                <div>
+                                    <strong>Your laundry is washed and dried!</strong>
+                                    <div class="text-xs font-normal">Please collect your bucket from the laundry room today.</div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Bucket Submission Form (Disabled if user has an active bucket) */}
+                <div class="glass-panel p-6 sm:p-8 rounded-3xl border border-slate-200">
+                    <h3 class="font-heading text-xl font-bold text-slate-900 mb-2">🧺 Drop a New Laundry Bucket</h3>
+                    <p class="text-xs text-slate-500 mb-6">
+                        {hasActiveBucket 
+                            ? "⚠️ You already have an active bucket in progress. You cannot submit another bucket until your current bucket is washed and collected."
+                            : "Enter your 4-digit PIN to confirm and add your bucket to the washing queue."
+                        }
+                    </p>
+
+                    {submitMsg.text && (
+                        <div class={`mb-4 p-3 rounded-xl text-xs font-semibold ${submitMsg.type === 'error' ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                            {submitMsg.text}
+                        </div>
+                    )}
+
+                    <form onSubmit={handleSubmitBucket} class="space-y-4 max-w-md">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">4-Digit Security PIN</label>
+                            <input 
+                                type="password" 
+                                required
+                                disabled={hasActiveBucket || submitting}
+                                value={submitPin}
+                                onChange={(e) => setSubmitPin(e.target.value)}
+                                placeholder="Enter your 4-digit PIN"
+                                maxlength="8"
+                                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100 disabled:text-slate-400"
+                            />
+                        </div>
+
+                        <button 
+                            type="submit"
+                            disabled={hasActiveBucket || submitting}
+                            class="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm btn-glow transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {submitting ? 'Submitting...' : hasActiveBucket ? 'Bucket Already In Queue' : 'Submit Bucket to Queue'}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        );
+    }
+
+    // =========================================================================
+    // SCREEN 3: LAUNDRY STAFF / PC DASHBOARD SCREEN
+    // =========================================================================
+    function StaffDashboardScreen({ user, stats, onRefreshStats }) {
+        const [requests, setRequests] = useState([]);
+        const [loading, setLoading] = useState(true);
+        const [filter, setFilter] = useState('ALL');
+
+        // Machine & Alert Controls
+        const [workingM, setWorkingM] = useState(stats.working_machines);
+        const [totalM, setTotalM] = useState(stats.total_machines);
+        const [alertMsg, setAlertMsg] = useState(stats.alert_message || '');
+        const [configSaving, setConfigSaving] = useState(false);
+        const [configStatus, setConfigStatus] = useState('');
+
+        const fetchRequests = async () => {
+            setLoading(true);
+            const res = await callApi({ 
+                action: 'PC_DASHBOARD', 
+                email: user.email, 
+                password: 'LaundryAdmin123' 
+            });
+            if (!res.error && res.requests) {
+                setRequests(res.requests);
+                if (res.config) {
+                    setWorkingM(res.config.working_machines);
+                    setTotalM(res.config.total_machines);
+                    setAlertMsg(res.config.alert_message || '');
+                }
+            }
+            setLoading(false);
+        };
+
+        useEffect(() => {
+            fetchRequests();
+        }, []);
+
+        const handleSaveConfig = async (e) => {
+            e.preventDefault();
+            setConfigSaving(true);
+            setConfigStatus('');
+
+            const res = await callApi({
+                action: 'UPDATE_SYSTEM_CONFIG',
+                email: user.email,
+                password: 'LaundryAdmin123',
+                working_machines: parseInt(workingM),
+                total_machines: parseInt(totalM),
+                alert_message: alertMsg.trim()
+            });
+
+            setConfigSaving(false);
+            if (res.error) {
+                setConfigStatus(`Error: ${res.error}`);
+            } else {
+                setConfigStatus('✅ Machine status & alert notice updated live!');
+                onRefreshStats();
+            }
+        };
+
+        const handleUpdateStatus = async (id, nextStatus) => {
+            const res = await callApi({
+                action: 'UPDATE_STATUS',
+                id: id,
+                newStatus: nextStatus
+            });
+
+            if (res.error) {
+                alert(`Error: ${res.error}`);
+            } else {
+                fetchRequests();
+                onRefreshStats();
+            }
+        };
+
+        const filtered = requests.filter(r => {
+            if (filter === 'ACTIVE') return ['REQUESTED', 'APPROVED_WAITING', 'QUEUED'].includes(r.status);
+            if (filter === 'WASHING') return r.status === 'WASHING';
+            if (filter === 'READY') return r.status === 'READY';
+            if (filter === 'COLLECTED') return ['COLLECTED', 'COMPLETED'].includes(r.status);
+            return true;
+        });
+
+        return (
+            <div class="space-y-6">
+                {/* Staff Header */}
+                <div class="glass-panel p-6 rounded-3xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div>
+                        <span class="text-xs font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-3 py-1 rounded-full">
+                            Laundry Management Control
+                        </span>
+                        <h2 class="font-heading text-2xl font-bold text-slate-900 mt-2">
+                            Staff Operations Center
+                        </h2>
+                        <p class="text-xs text-slate-500">Logged in as: {user.email}</p>
+                    </div>
+
+                    <button 
+                        onClick={() => { fetchRequests(); onRefreshStats(); }}
+                        class="px-4 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold border border-slate-200 transition"
+                    >
+                        🔄 Refresh Queue
+                    </button>
+                </div>
+
+                {/* Machine Status & Alert Broadcast Panel */}
+                <div class="glass-panel p-6 sm:p-8 rounded-3xl border border-slate-200">
+                    <h3 class="font-heading text-lg font-bold text-slate-900 mb-1">
+                        ⚙️ Washing Machine Controls & Campus Notice Broadcast
+                    </h3>
+                    <p class="text-xs text-slate-500 mb-6">
+                        Update operational machines and broadcast real-time announcements to students if machines are undergoing repairs.
+                    </p>
+
+                    {configStatus && (
+                        <div class="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+                            {configStatus}
+                        </div>
+                    )}
+
+                    <form onSubmit={handleSaveConfig} class="space-y-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Working Machines</label>
+                                <input 
+                                    type="number"
+                                    min="0"
+                                    max="20"
+                                    value={workingM}
+                                    onChange={(e) => setWorkingM(e.target.value)}
+                                    class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                                />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Total Available Machines</label>
+                                <input 
+                                    type="number"
+                                    min="1"
+                                    max="20"
+                                    value={totalM}
+                                    onChange={(e) => setTotalM(e.target.value)}
+                                    class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                                />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Worker Alert / Repair Announcement (Leave blank for normal operations)
+                            </label>
+                            <input 
+                                type="text"
+                                value={alertMsg}
+                                onChange={(e) => setAlertMsg(e.target.value)}
+                                placeholder="e.g. Machine 2 & 4 under repair. Expect 30 mins delay."
+                                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                            />
+                        </div>
+
+                        <div class="flex gap-3">
+                            <button 
+                                type="submit"
+                                disabled={configSaving}
+                                class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm btn-glow transition disabled:opacity-50"
+                            >
+                                {configSaving ? 'Saving...' : '💾 Update Status & Alert'}
+                            </button>
+                            {alertMsg && (
+                                <button 
+                                    type="button"
+                                    onClick={() => { setAlertMsg(''); }}
+                                    class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                                >
+                                    Clear Text
+                                </button>
+                            )}
+                        </div>
+                    </form>
+                </div>
+
+                {/* Bucket Requests Queue */}
+                <div class="glass-panel p-6 sm:p-8 rounded-3xl border border-slate-200">
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                        <div>
+                            <h3 class="font-heading text-lg font-bold text-slate-900">Student Laundry Queue</h3>
+                            <p class="text-xs text-slate-500">Advance laundry stages and manage bucket queue in real time.</p>
+                        </div>
+
+                        {/* Filter Tabs */}
+                        <div class="flex flex-wrap gap-1 p-1 bg-slate-100 rounded-xl text-xs font-bold">
+                            {['ALL', 'ACTIVE', 'WASHING', 'READY', 'COLLECTED'].map((t) => (
+                                <button
+                                    key={t}
+                                    onClick={() => setFilter(t)}
+                                    class={`px-3 py-1.5 rounded-lg transition ${filter === t ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                                >
+                                    {t}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {loading ? (
+                        <div class="text-center py-12 text-slate-400 text-sm">Loading bucket queue...</div>
+                    ) : filtered.length === 0 ? (
+                        <div class="text-center py-12 text-slate-400 text-sm">No buckets under filter "{filter}".</div>
+                    ) : (
+                        <div class="space-y-3">
+                            {filtered.map((req) => (
+                                <div key={req.id} class="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                    <div class="space-y-1">
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-bold text-slate-900">Bucket #{req.id}</span>
+                                            <span class="text-xs text-slate-400 font-medium">({req.date || 'N/A'})</span>
+                                            <StatusBadge status={req.status} />
+                                        </div>
+                                        <div class="text-xs text-slate-600">
+                                            <strong>Roll:</strong> {req.rollNo} · <strong>Email:</strong> {req.email}
+                                        </div>
+                                    </div>
+
+                                    {/* Quick Actions */}
+                                    <div class="flex flex-wrap gap-2">
+                                        {req.status === 'REQUESTED' && (
+                                            <button 
+                                                onClick={() => handleUpdateStatus(req.id, 'APPROVED_WAITING')}
+                                                class="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold text-xs"
+                                            >
+                                                Queue
+                                            </button>
+                                        )}
+                                        {['REQUESTED', 'APPROVED_WAITING'].includes(req.status) && (
+                                            <button 
+                                                onClick={() => handleUpdateStatus(req.id, 'WASHING')}
+                                                class="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold text-xs flex items-center gap-1"
+                                            >
+                                                <span>Start Wash</span> <span>🔄</span>
+                                            </button>
+                                        )}
+                                        {req.status === 'WASHING' && (
+                                            <button 
+                                                onClick={() => handleUpdateStatus(req.id, 'READY')}
+                                                class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm"
+                                            >
+                                                <span>Mark Ready</span> <span>✅</span>
+                                            </button>
+                                        )}
+                                        {req.status === 'READY' && (
+                                            <button 
+                                                onClick={() => handleUpdateStatus(req.id, 'COLLECTED')}
+                                                class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold text-xs"
+                                            >
+                                                Mark Picked Up ✅
+                                            </button>
+                                        )}
+                                        {['REQUESTED', 'APPROVED_WAITING'].includes(req.status) && (
+                                            <button 
+                                                onClick={() => handleUpdateStatus(req.id, 'REJECTED')}
+                                                class="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-xs"
+                                            >
+                                                Reject
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    // =========================================================================
+    // HELPER: STATUS BADGE COMPONENT
+    // =========================================================================
+    function StatusBadge({ status }) {
+        const styles = {
+            REQUESTED: 'bg-blue-50 text-blue-700 border-blue-200',
+            APPROVED_WAITING: 'bg-purple-50 text-purple-700 border-purple-200',
+            WASHING: 'bg-amber-50 text-amber-700 border-amber-200',
+            READY: 'bg-emerald-50 text-emerald-700 border-emerald-200 font-extrabold',
+            COMPLETED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+            COLLECTED: 'bg-slate-100 text-slate-600 border-slate-200',
+            REJECTED: 'bg-rose-50 text-rose-700 border-rose-200'
+        };
+
+        return (
+            <span class={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold border uppercase tracking-wide ${styles[status] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                {status ? status.replace('_', ' ') : 'UNKNOWN'}
+            </span>
+        );
+    }
+
+    // Render React App
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+</body>
+</html>
